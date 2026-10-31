@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, Field
 
 
@@ -23,12 +21,15 @@ class ConnectInvocationMetadataModel(BaseModel):
 class ConnectCustomerProfileModel(BaseModel):
     """Customer profile record model.
 
-    CustomerData is campaign-defined and can be a raw JSON string or structured object.
-    Users can inherit from this model to provide a typed schema for CustomerData.
+    CustomerData is a JSON string with campaign-defined key-value pairs. To get a typed object,
+    inherit from this model and declare the field as ``Json[YourModel]`` so Pydantic decodes the string:
+
+        class Profile(ConnectCustomerProfileModel):
+            customer_data: Json[CustomerPayload] = Field(..., alias="CustomerData")
     """
 
     profile_id: str = Field(..., alias="ProfileId")
-    customer_data: Any = Field(..., alias="CustomerData")
+    customer_data: str = Field(..., alias="CustomerData")
     idempotency_token: str = Field(..., alias="IdempotencyToken")
 
 

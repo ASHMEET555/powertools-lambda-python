@@ -1,5 +1,5 @@
 import pytest
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, Json, ValidationError
 
 from aws_lambda_powertools.utilities.parser import parse
 from aws_lambda_powertools.utilities.parser.models import (
@@ -63,21 +63,43 @@ def test_connect_outbound_campaigns_event_missing_required_fields():
 
 
 def test_connect_outbound_campaigns_event_with_custom_typed_customer_data():
+    # GIVEN the event as the service sends it, with CustomerData as a JSON string
     raw_event = load_event("connectOutboundCampaignsEvent.json")
-    # Simulate parsed JSON or custom dict payload for customer_data
-    raw_event["Items"]["CustomerProfiles"][0]["CustomerData"] = {
-        "firstName": "John",
-        "lastName": "Doe",
-        "email": "john.doe@example.com",
-    }
-    raw_event["Items"]["CustomerProfiles"][1]["CustomerData"] = {
-        "firstName": "Jane",
-        "lastName": "Smith",
-        "email": "jane.smith@example.com",
-    }
 
-    parsed = parse(event=raw_event, model=CustomConnectOutboundCampaignsEventModel)
-    profile = parsed.items.customer_profiles[0]
-    assert profile.customer_data.firstName == "John"
-    assert profile.customer_data.lastName == "Doe"
-    assert profile.customer_data.email == "john.doe@example.com"
+    # AND models that decode CustomerData into a typed payload with Json[...]
+    class TypedProfile(ConnectCustomerProfileModel):
+        customer_data: Json[CustomerPayload] = Field(..., alias="CustomerData")
+
+    class TypedItems(ConnectItemsModel):
+        customer_profiles: list[TypedProfile] = Field(..., alias="CustomerProfiles")
+
+    class TypedEvent(ConnectOutboundCampaignsEventModel):
+        items: TypedItems = Field(..., alias="Items")
+
+    # WHEN parsing the event
+    parsed = parse(event=raw_event, model=TypedEvent)
+
+    # THEN each CustomerData string is decoded into the typed model
+    first, second = parsed.items.customer_profiles
+    assert first.customer_data == CustomerPayload(firstName="John", lastName="Doe", email="john.doe@example.com")
+    assert second.customer_data.firstName == "Jane"
+
+
+def test_connect_outbound_campaigns_event_typed_customer_data_rejects_invalid_json():
+    # GIVEN CustomerData that is not valid JSON
+    raw_event = load_event("connectOutboundCampaignsEvent.json")
+    raw_event["Items"]["CustomerProfiles"][0]["CustomerData"] = "not json"
+
+    class TypedProfile(ConnectCustomerProfileModel):
+        customer_data: Json[CustomerPayload] = Field(..., alias="CustomerData")
+
+    class TypedItems(ConnectItemsModel):
+        customer_profiles: list[TypedProfile] = Field(..., alias="CustomerProfiles")
+
+    class TypedEvent(ConnectOutboundCampaignsEventModel):
+        items: TypedItems = Field(..., alias="Items")
+
+    # WHEN parsing the event
+    # THEN validation fails instead of silently passing the string through
+    with pytest.raises(ValidationError):
+        parse(event=raw_event, model=TypedEvent)
